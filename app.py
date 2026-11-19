@@ -1604,7 +1604,8 @@ def _strip_burned_captions(output_dir, filename, materialize=True):
     import hooks
     filename = _strip_watermark_copy(output_dir, filename)
     while True:
-        m = re.match(r'^subtitled_\d+_(.+)$', filename)
+        # logo_ (brand_logo.py) sits on top of captions; drop it too.
+        m = re.match(r'^(?:subtitled|logo)_\d+_(.+)$', filename)
         if not m:
             return filename
         under = m.group(1)
@@ -8498,6 +8499,96 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
         "success": True,
         "new_video_url": f"/videos/{req.job_id}/{output_filename}"
     }
+
+@app.post("/api/logo")
+async def add_brand_logo(
+    request: Request,
+    job_id: str = Form(...),
+    clip_index: int = Form(...),
+    logo: UploadFile = File(...),
+    position: str = Form("top-right"),
+    width: Optional[float] = Form(None),
+    opacity: Optional[float] = Form(None),
+    x_margin: Optional[float] = Form(None),
+    y_margin: Optional[float] = Form(None),
+    input_filename: Optional[str] = Form(None),
+):
+    """Burn a campaign/brand logo onto a finished clip (see brand_logo.py).
+
+    Works on the clip as currently served (captions included) unless
+    ``input_filename`` names another file of the job. Sending a new logo for a
+    clip that already has one replaces it instead of stacking. Apply it last:
+    re-captioning starts from the clip without captions and drops the logo.
+    """
+    import brand_logo
+    try:
+        opts = brand_logo.normalize(position, width, opacity, x_margin, y_margin)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    ext = os.path.splitext(logo.filename or "")[1].lower()
+    if ext not in brand_logo.ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=(
+            f"Logo must be one of: {', '.join(brand_logo.ALLOWED_EXTENSIONS)}."))
+    payload = await logo.read(brand_logo.MAX_LOGO_BYTES + 1)
+    if not payload or len(payload) > brand_logo.MAX_LOGO_BYTES:
+        raise HTTPException(status_code=400, detail="Logo must be 1 byte to 10 MB.")
+
+    await require_managed_entitlement(request)
+    await _ensure_job_files(job_id, request)
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = jobs[job_id]
+    await _assert_job_owner(request, job)
+
+    output_dir = os.path.join(OUTPUT_DIR, job_id)
+    json_files = glob.glob(os.path.join(output_dir, "*_metadata.json"))
+    if not json_files:
+        raise HTTPException(status_code=404, detail="Metadata not found")
+    with open(json_files[0], 'r') as f:
+        data = json.load(f)
+    clips = data.get('shorts', [])
+    if clip_index < 0 or clip_index >= len(clips):
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    filename = os.path.basename(input_filename or
+                                clips[clip_index].get('video_url', '').split('/')[-1])
+    if not filename:
+        raise HTTPException(status_code=404, detail="Clip has no video file")
+    filename = _strip_watermark_copy(output_dir, filename)
+    filename = brand_logo.strip_logo(output_dir, filename)
+    input_path = os.path.join(output_dir, filename)
+    if not os.path.exists(input_path):
+        raise HTTPException(status_code=404, detail=f"Video file not found: {filename}")
+
+    generation_id = int(time.time())
+    logo_path = os.path.join(output_dir, f"brand_logo_{clip_index}_{generation_id}{ext}")
+    with open(logo_path, "wb") as f:
+        f.write(payload)
+    output_filename = f"logo_{generation_id}_{filename}"
+    output_path = os.path.join(output_dir, output_filename)
+    try:
+        placed = await asyncio.get_event_loop().run_in_executor(
+            None, functools.partial(brand_logo.apply_logo, input_path, logo_path,
+                                    output_path, **opts))
+    except Exception as e:
+        print(f"❌ Logo Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    print(f"🏷️ Logo burned: {output_filename} at {placed['box']}")
+
+    output_filename = await _deliver(request, job_id, output_filename)
+    video_url = f"/videos/{job_id}/{output_filename}"
+    if clip_index < len(job.get('result', {}).get('clips', [])):
+        job['result']['clips'][clip_index]['video_url'] = video_url
+    try:
+        clips[clip_index]['video_url'] = video_url
+        clips[clip_index]['brand_logo'] = {**placed, "file": os.path.basename(logo_path)}
+        data['shorts'] = clips
+        write_json_atomic(json_files[0], data, indent=4)
+    except Exception as e:
+        print(f"⚠️ Failed to update metadata.json: {e}")
+    _archive_clip_edit_bg(job_id, clip_index, output_filename)
+    return {"success": True, "new_video_url": video_url, "logo": placed}
+
 
 class RemoveSubtitlesRequest(BaseModel):
     job_id: str
