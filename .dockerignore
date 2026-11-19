@@ -68,3 +68,8 @@ README.md
 
 # Rust build output
 osrender/target/
+
+# Local: runtime data is bind-mounted, never bake it into the image
+output/
+uploads/
+**/*.mp4
