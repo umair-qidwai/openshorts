@@ -56,6 +56,8 @@ def merge_continuation_words(words):
             prev["word"] = f"{prev.get('word', '')}{text}"
             if word.get("end") is not None:
                 prev["end"] = word["end"]
+            if word.get("probability") is not None:
+                prev["probability"] = min(prev.get("probability", 1.0), word["probability"])
         else:
             merged.append(dict(word))
     return merged

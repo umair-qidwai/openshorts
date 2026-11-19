@@ -243,7 +243,8 @@ def _transcribe_with_whisper(media_path):
     text_parts = []
     for segment in segments:
         words = [
-            {"word": w.word, "start": float(w.start), "end": float(w.end)}
+            {"word": w.word, "start": float(w.start), "end": float(w.end),
+             "probability": round(float(getattr(w, "probability", 1.0) or 0.0), 3)}
             for w in (segment.words or [])
         ]
         out_segments.append({
@@ -628,7 +629,8 @@ def _whisper_span(audio, language):
         segments, _info = model.transcribe(audio, **params)
         segments = list(segments)
     words = [
-        {"word": w.word, "start": float(w.start), "end": float(w.end)}
+        {"word": w.word, "start": float(w.start), "end": float(w.end),
+             "probability": round(float(getattr(w, "probability", 1.0) or 0.0), 3)}
         for seg in segments for w in (seg.words or [])
     ]
     text = " ".join(seg.text.strip() for seg in segments if seg.text.strip())

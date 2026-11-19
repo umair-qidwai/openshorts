@@ -32,6 +32,8 @@ import layout_picker
 import llm_backend
 import yt_account
 import twitch_signals
+from sentence_snap import (review_flags, sentence_snap_enabled,
+                            snap_clip_to_sentences)
 from clip_selection import (build_transcript_windows, clip_count_targets,
                             clip_duration_bounds, dedupe_overlapping,
                             score_batches, shortlist_target,
@@ -2284,7 +2286,8 @@ def get_viral_clips(transcript_result, video_duration, viewer_clips=None):
     words = []
     for segment in transcript_result['segments']:
         for word in segment.get('words', []):
-            words.append({'w': word['word'], 's': word['start'], 'e': word['end']})
+            words.append({'w': word['word'], 's': word['start'], 'e': word['end'],
+                          'p': word.get('probability')})
 
     try:
         # Scoring windows must be able to CONTAIN a max-length clip (the detail
@@ -2408,7 +2411,13 @@ def get_viral_clips(transcript_result, video_duration, viewer_clips=None):
             s["proposed"] = [s.get("start", 0), s.get("end", 0)]
             ns, ne = snap_clip_to_words(s.get("start", 0), s.get("end", 0), words, video_duration,
                                         min_duration=min_secs, max_duration=max_secs)
+            if sentence_snap_enabled():
+                # Word edges stop mid-word cuts; sentence edges stop clips that
+                # open on "didn't change. So..." or close on "...about the".
+                ns, ne = snap_clip_to_sentences(ns, ne, words, video_duration,
+                                                min_duration=min_secs, max_duration=max_secs)
             s["start"], s["end"] = ns, ne
+            s["review"] = review_flags(ns, ne, words)
         deduped = dedupe_overlapping(shorts)
         if len(deduped) < len(shorts):
             print(f"   Dropped {len(shorts) - len(deduped)} clip(s) overlapping a "
