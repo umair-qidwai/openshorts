@@ -565,6 +565,35 @@ def estimate_outcome(plan, source_minutes, remaining, processed_before):
     return {**out, "outcome": "needs_more", "partial_minutes": partial_offer(cost, remaining)}
 
 
+def _self_host_source_cut(source_range):
+    """The ``partial`` for a chosen range when billing is off (self-host/BYOK).
+
+    The range used to be read only inside the metering path, so with billing
+    off ``source_start``/``source_end`` were silently ignored and the whole
+    video was clipped. Nothing is reserved here; the range is just cut. With no
+    metering probe the duration is unknown, so both ends are required; main.py
+    still clamps the cut to the real source length.
+    """
+    if not source_range:
+        return None
+    start_raw, end_raw = source_range
+    if start_raw in (None, "") and end_raw in (None, ""):
+        return None
+    try:
+        start = max(0.0, float(start_raw)) if start_raw not in (None, "") else 0.0
+        end = float(end_raw) if end_raw not in (None, "") else None
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="source_start / source_end must be seconds.")
+    if end is None:
+        raise HTTPException(status_code=400, detail=(
+            "source_end is required with source_start when billing is off."))
+    if end - start < MIN_RANGE_SECONDS:
+        raise HTTPException(status_code=400, detail=(
+            f"Pick at least {MIN_RANGE_SECONDS} seconds of the video to clip."))
+    return {"processed_minutes": round((end - start) / 60.0, 4), "total_minutes": None,
+            "start_seconds": round(start, 3), "end_seconds": round(end, 3), "chosen": True}
+
+
 async def reserve_process_minutes(request, url, input_path, job_id, max_minutes=None,
                                   source_range=None):
     """Meter a managed /api/process request.
@@ -589,7 +618,7 @@ async def reserve_process_minutes(request, url, input_path, job_id, max_minutes=
     on the operator's key for free. Only skip metering when billing is off.
     """
     if not BILLING_ENABLED:
-        return None, 2, None, None, None
+        return None, 2, None, None, _self_host_source_cut(source_range)
     user = await _user_from_request(request)
     if not managed_keys.has_active_entitlement(user):
         return None, 2, None, None, None  # shouldn't happen (resolve_gemini would have 402'd)
