@@ -8315,6 +8315,12 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
                 detail=f"Unknown preset. Use one of: {', '.join(CAPTION_PRESETS)}.")
         req = req.model_copy(update={k: v for k, v in preset.items()
                                      if k not in req.model_fields_set})
+    if req.effect == "rounded":
+        from rounded_captions import validate_style
+        try:
+            validate_style(req.model_dump())
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
     await require_managed_entitlement(request)
     await _ensure_job_files(req.job_id, request)
     if req.job_id not in jobs:

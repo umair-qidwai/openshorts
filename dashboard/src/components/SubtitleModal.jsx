@@ -6,6 +6,7 @@ import Modal from './ui/Modal';
 import SegmentedControl from './ui/SegmentedControl';
 
 const FONT_OPTIONS = [
+    { value: 'Barlow Condensed Black', label: 'Barlow Condensed Black Italic' },
     { value: 'Anton', label: 'Anton' },
     { value: 'Montserrat ExtraBold', label: 'Montserrat' },
     { value: 'Verdana', label: 'Verdana' },
@@ -37,6 +38,7 @@ const HIGHLIGHT_PRESETS = [
 ];
 
 const ANIMATION_OPTIONS = [
+    { value: 'rounded', label: 'Rounded' },
     { value: 'pop', label: 'Pop' },
     { value: 'word-highlight', label: 'Glow' },
     { value: 'karaoke', label: 'Box' },
@@ -46,13 +48,14 @@ const ANIMATION_OPTIONS = [
 // Preview animation -> the effect burned server-side, so what the modal
 // plays is what the clip gets. 'karaoke' in the preview is a box behind the
 // active word, which is the 'highlight' effect.
-const ANIMATION_TO_EFFECT = { pop: 'pop', 'word-highlight': 'glow', karaoke: 'highlight', none: 'none' };
-const EFFECT_TO_ANIMATION = { pop: 'pop', glow: 'word-highlight', highlight: 'karaoke', box: 'karaoke', none: 'none' };
+const ANIMATION_TO_EFFECT = { rounded: 'rounded', pop: 'pop', 'word-highlight': 'glow', karaoke: 'highlight', none: 'none' };
+const EFFECT_TO_ANIMATION = { rounded: 'rounded', pop: 'pop', glow: 'word-highlight', highlight: 'karaoke', box: 'karaoke', none: 'none' };
 
 // Font size in the units /api/subtitle takes. S is what every clip ships
 // with (subtitles.AUTO_CAPTION_STYLE font_size 40), so opening the modal and
 // applying never resizes the captions.
 const SIZE_OPTIONS = [
+    { value: 28, label: 'XS' },
     { value: 40, label: 'S' },
     { value: 44, label: 'M' },
     { value: 56, label: 'L' },
@@ -79,6 +82,7 @@ const POSITION_OPTIONS = [
 // Ready-made caption looks burned server-side as karaoke ASS (word highlight):
 // dimmed base text + strong active word, optional glow/pop/box effect.
 const CAPTION_PRESETS = [
+    { id: 'rounded_red', label: 'Rounded red', style: 'karaoke', effect: 'rounded', highlightColor: '#E52336', baseOpacity: 1.0, uppercase: true, fontName: 'Barlow Condensed Black', borderWidth: 1, shadow: 1, fontSize: 28 },
     // What every clip ships with (subtitles.AUTO_CAPTION_STYLE).
     { id: 'default', label: 'Default',  style: 'karaoke', effect: 'pop',       highlightColor: '#FFE500', baseOpacity: 1.0, uppercase: true,  fontName: 'Anton', borderWidth: 2, fontSize: 40 },
     // Trending short-form looks (2026): word-by-word build-up, a box behind
@@ -143,6 +147,10 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
     const setAnimation = (value) => {
         setAnimationState(value);
         if (style === 'karaoke') setEffect(ANIMATION_TO_EFFECT[value] || 'none');
+        if (value === 'rounded') {
+            setStyle('karaoke'); setEffect('rounded');
+            setFontName('Barlow Condensed Black'); setBaseOpacity(1); setBgOpacity(0);
+        }
     };
 
     const applyPreset = (p) => {
@@ -163,7 +171,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
         setAnimationState(p.style === 'karaoke' ? (EFFECT_TO_ANIMATION[p.effect] || 'none') : 'none');
     };
 
-    const maxChars = lineBudget(fontName, fontSize, oneWord);
+    const maxChars = effect === 'rounded' && !oneWord ? 18 : lineBudget(fontName, fontSize, oneWord);
     // Same block duration as the auto captions (AUTO_CAPTION_STYLE).
     const maxDuration = 1.4;
 
@@ -286,13 +294,18 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                             <Loader2 size={16} className="animate-spin" />
                             <span className="text-sm lowercase">Loading preview...</span>
                         </div>
-                    ) : useRemotionPreview ? (
+                    ) : useRemotionPreview && effect !== 'rounded' ? (
                         <RemotionPreview
                             videoUrl={videoUrl}
                             durationInSeconds={durationSec}
                             subtitles={subtitleConfig}
                             hook={existingHook || null}
                         />
+                    ) : effect === 'rounded' ? (
+                        <>
+                            <video src={videoUrl} controls playsInline className="w-full h-full object-contain" />
+                            <p className="absolute top-2 px-3 py-2 bg-black/80 text-white text-xs">Rounded red uses the native renderer. Apply to see the exact result; video shows the current render.</p>
+                        </>
                     ) : (
                         <>
                             <video src={videoUrl} className="w-full h-full object-contain opacity-50" muted playsInline />
@@ -350,6 +363,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                                             min="30"
                                             max="100"
                                             value={Math.round(baseOpacity * 100)}
+                                            disabled={effect === 'rounded'}
                                             onChange={(e) => setBaseOpacity(parseInt(e.target.value) / 100)}
                                             className="w-full accent-[var(--color-accent)]"
                                         />
@@ -442,6 +456,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                             <p className="eyebrow mb-2">Font</p>
                             <select
                                 value={fontName}
+                                disabled={effect === 'rounded'}
                                 onChange={(e) => setFontName(e.target.value)}
                                 className="input-field"
                             >
@@ -499,7 +514,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                                     <input
                                         type="range"
                                         min="0"
-                                        max="5"
+                                        max={effect === 'rounded' ? "3" : "5"}
                                         value={borderWidth}
                                         onChange={(e) => setBorderWidth(parseInt(e.target.value))}
                                         className="w-full accent-[var(--color-accent)]"
@@ -517,7 +532,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                             <div className="flex items-center justify-between mb-2">
                                 <p className="eyebrow">Background</p>
                                 <label className="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" checked={bgOpacity > 0} onChange={(e) => setBgOpacity(e.target.checked ? 0.5 : 0)} className="sr-only peer" />
+                                    <input type="checkbox" disabled={effect === 'rounded'} checked={bgOpacity > 0} onChange={(e) => setBgOpacity(e.target.checked ? 0.5 : 0)} className="sr-only peer" />
                                     <div className="w-8 h-4 rounded-full bg-paper3 peer-checked:bg-brass transition-colors after:content-[''] after:absolute after:top-0 after:left-0 after:h-4 after:w-4 after:rounded-full after:bg-ink after:transition-all peer-checked:after:translate-x-full"></div>
                                 </label>
                             </div>
@@ -561,7 +576,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                                 style, effect, baseOpacity, uppercase, highlightColor,
                                 reveal: !oneWord && reveal, shadow, maxChars, maxDuration,
                                 // Remotion data
-                                remotion: useRemotionPreview ? subtitleConfig : null,
+                                remotion: useRemotionPreview && effect !== 'rounded' ? subtitleConfig : null,
                                 captions: textEdited ? captions : null,
                             };
                             const bulkRunning = bulkProgress?.running;

@@ -152,7 +152,7 @@ def generate_srt_from_video(video_path, output_path, max_chars=20, max_duration=
 
 
 def _collect_word_blocks(transcript, clip_start, clip_end, max_chars=20, max_duration=2.0,
-                         fits=None):
+                         fits=None, sentence_aware=False):
     """
     Flatten transcript words for a clip range and group them into short blocks
     suitable for vertical video. Returns a list of blocks; each block is a list
@@ -198,7 +198,8 @@ def _collect_word_blocks(transcript, clip_start, clip_end, max_chars=20, max_dur
 
         too_wide = fits is not None and not fits(
             [w['word'] for w in current_block] + [word['word']])
-        if current_text_len + len(word['word']) > max_chars or duration > max_duration or too_wide:
+        sentence_end = sentence_aware and re.search(r'[.!?]["\'”’)\]]*$', current_block[-1]["word"])
+        if sentence_end or current_text_len + len(word['word']) > max_chars or duration > max_duration or too_wide:
             blocks.append(current_block)
             current_block = [word]
             block_start = word['start']
@@ -273,6 +274,10 @@ _PRESET_BASE = {"style": "karaoke", "font_color": "#FFFFFF", "bg_opacity": 0.0,
                 "base_opacity": 1.0, "reveal": False, "shadow": 0,
                 "max_duration": 1.4}
 CAPTION_PRESETS = {
+    "rounded_red": {**_PRESET_BASE, "font_name": "Barlow Condensed Black",
+                    "font_size": 28, "highlight_color": "#E52336",
+                    "border_width": 1, "shadow": 1, "effect": "rounded",
+                    "uppercase": True, "max_chars": 18},
     "default": {**_PRESET_BASE, "font_name": "Anton", "font_size": 40,
                 "highlight_color": "#FFE500", "border_width": 2, "effect": "pop",
                 "uppercase": True, "max_chars": 18},
@@ -325,7 +330,8 @@ def line_budget(font_name, font_size):
 # with); any other font keeps the budget and libass's own wrapping.
 _FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
 _FONT_FILES = {"Anton": "Anton-Regular.ttf", "Impact": "Anton-Regular.ttf",
-               "Montserrat ExtraBold": "Montserrat-ExtraBold.ttf"}
+               "Montserrat ExtraBold": "Montserrat-ExtraBold.ttf",
+               "Barlow Condensed Black": "BarlowCondensed-BlackItalic.ttf"}
 # PlayResX that libass derives for a 9:16 frame from PlayResY 288, minus the
 # style's MarginL + MarginR (10 each).
 _LINE_UNITS = 288 * 9 / 16 - 20
@@ -474,6 +480,19 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
     0 it is the soft "clean" look; a hard outline does not need it.
     max_chars=1 puts one word on screen at a time.
     """
+    if effect == "rounded":
+        from rounded_captions import generate, validate_style
+        validate_style(dict(effect=effect, font_name=font_name,
+                            bg_opacity=bg_opacity, base_opacity=base_opacity))
+        return generate(transcript, clip_start, clip_end, output_path,
+                        max_chars=max_chars, max_duration=max_duration,
+                        alignment=alignment, fontsize=fontsize, font_name=font_name,
+                        font_color=font_color, border_color=border_color,
+                        border_width=border_width, highlight_color=highlight_color,
+                        uppercase=uppercase, margin_v=margin_v,
+                        split_ranges=split_ranges, shadow=shadow,
+                        base_opacity=base_opacity, reveal=reveal)
+
     # Match the SRT burn path: PlayResY 288 keeps font sizes consistent.
     final_fontsize = int(_clamp_number(fontsize, 10, 200, 16) * 0.85)
     if final_fontsize < 10:
