@@ -43,6 +43,15 @@ oversized word to maintain edge clearance. Phrases split after terminal
 language-aware sentence parser (abbreviations can split). Whitespace and ASS
 control characters are sanitized by the existing text helper.
 
+Backing measurements match libass's unkerned advances and Windows ascender,
+not Pillow's default kerning/hhea baseline. Geometry includes the full outline
+and positive-offset shadow in final script units (ASS glyph scaling does not
+scale those strokes). Minimum padding exists at the initial animation frame;
+the settled box expands from that safe envelope. Narrowed words keep at least
+one script unit of padding. The complete settled envelope and neighboring
+word ink participate in fitting, so neither corners nor adjacent words consume
+the clearance.
+
 Within a phrase the backing runs to the next word's onset; the final backing
 ends at the phrase end, capped to the clip and next phrase onset. Real pauses
 between phrases remain blank. Overlapping word intervals switch emphasis at
@@ -70,7 +79,7 @@ approximation; production checks must verify libass selects
 ## Tests
 
 ```sh
-python -m unittest -v test_rounded_captions
+python -m unittest -v test_rounded_captions test_rounded_caption_raster
 ```
 
 Includes geometry bounds, phrase boundaries, timing overlaps, long words at
